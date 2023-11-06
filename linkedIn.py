@@ -6,19 +6,31 @@ from selenium.webdriver.common.by import By
 import parameters, csv, os.path, time
 import random
 
+short_random = random.randint(5, 20)
+medium_random = random.randint(20, 60)
+long_random = random.randint(60, 100)
+
+def open_profile(profile_link):   
+    driver.execute_script("window.open('', '_blank');")
+    driver.switch_to.window(driver.window_handles[-1])
+    driver.get(profile_link)
+    time.sleep(short_random)
+    html = driver.find_element(By.TAG_NAME, 'html')
+    html.send_keys(Keys.END)
+    time.sleep(short_random)
+    driver.close()  
+    driver.switch_to.window(driver.window_handles[0])  
 
 # Functions
 def search_and_send_request(keywords, till_page, writer, ignore_list=[]):
     for page in range(1, till_page + 1):
         print('\nINFO: Checking on page %s' % (page))
-        query_url = 'https://www.linkedin.com/search/results/people/?geoUrn=%5B%22105015875%22%5D&keywords=' + keywords + '&origin=GLOBAL_SEARCH_HEADER&page=' + str(page)
+        query_url = 'https://www.linkedin.com/search/results/people/?keywords=' + keywords + '&origin=GLOBAL_SEARCH_HEADER&page=' + str(page)
         driver.get(query_url)
-        numero_random = random.randint(5, 100)
-        print(numero_random)
-        time.sleep(numero_random)
+        time.sleep(medium_random)
         html = driver.find_element(By.TAG_NAME, 'html')
         html.send_keys(Keys.END)
-        time.sleep(numero_random)
+        time.sleep(medium_random)
         linkedin_urls = driver.find_elements(By.CLASS_NAME, 'reusable-search__result-container')
         print('INFO: %s connections found on page %s' % (len(linkedin_urls), page))
         for index, result in enumerate(linkedin_urls, start=1):
@@ -36,19 +48,22 @@ def search_and_send_request(keywords, till_page, writer, ignore_list=[]):
                 try:
                     coordinates = connection.location_once_scrolled_into_view  # returns dict of X, Y coordinates
                     driver.execute_script("window.scrollTo(%s, %s);" % (coordinates['x'], coordinates['y']))
-                    time.sleep(numero_random)
+                    time.sleep(medium_random)
                     connection.click()
-                    time.sleep(numero_random)
+                    time.sleep(medium_random)
                     if driver.find_elements(By.CLASS_NAME, 'artdeco-button--primary')[0].is_enabled():
                         driver.find_elements(By.CLASS_NAME, 'artdeco-button--primary')[0].click()
                         writer.writerow([text])
                         print("%s ) SENT: %s" % (index, text))
+                        profile_link = result.find_element(By.TAG_NAME, 'a').get_attribute('href')
+                        open_profile(profile_link)
+                        
                     else:
                         driver.find_elements(By.CLASS_NAME, 'artdeco-modal__dismiss')[0].click()
                         print("%s ) CANT: %s" % (index, text))
                 except Exception as e:
                     print('%s ) ERROR: %s' % (index, text))
-                time.sleep(numero_random)
+                time.sleep(medium_random)
             elif connection.text == 'Pending':
                 print("%s ) PENDING: %s" % (index, text))
             else:
