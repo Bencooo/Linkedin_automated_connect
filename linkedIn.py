@@ -27,10 +27,10 @@ def search_and_send_request(keywords, till_page, writer, ignore_list=[]):
         print('\nINFO: Checking on page %s' % (page))
         query_url = 'https://www.linkedin.com/search/results/people/?keywords=' + keywords + '&origin=GLOBAL_SEARCH_HEADER&page=' + str(page)
         driver.get(query_url)
-        time.sleep(short_random)
+        time.sleep(medium_random)
         html = driver.find_element(By.TAG_NAME, 'html')
         html.send_keys(Keys.END)
-        time.sleep(short_random)
+        time.sleep(medium_random)
         linkedin_urls = driver.find_elements(By.CLASS_NAME, 'reusable-search__result-container')
         print('INFO: %s connections found on page %s' % (len(linkedin_urls), page))
         for index, result in enumerate(linkedin_urls, start=1):
@@ -48,9 +48,9 @@ def search_and_send_request(keywords, till_page, writer, ignore_list=[]):
                 try:
                     coordinates = connection.location_once_scrolled_into_view  # returns dict of X, Y coordinates
                     driver.execute_script("window.scrollTo(%s, %s);" % (coordinates['x'], coordinates['y']))
-                    time.sleep(short_random)
+                    time.sleep(medium_random)
                     connection.click()
-                    time.sleep(short_random)
+                    time.sleep(medium_random)
                     if driver.find_elements(By.CLASS_NAME, 'artdeco-button--primary')[0].is_enabled():
                         driver.find_elements(By.CLASS_NAME, 'artdeco-button--primary')[0].click()
                         writer.writerow([text])
@@ -63,7 +63,7 @@ def search_and_send_request(keywords, till_page, writer, ignore_list=[]):
                         print("%s ) CANT: %s" % (index, text))
                 except Exception as e:
                     print('%s ) ERROR: %s' % (index, text))
-                time.sleep(short_random)
+                time.sleep(medium_random)
             elif connection.text == 'Pending':
                 print("%s ) PENDING: %s" % (index, text))
             else:
