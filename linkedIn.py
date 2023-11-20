@@ -9,6 +9,7 @@ import random
 short_random = random.randint(5, 20)
 medium_random = random.randint(20, 60)
 long_random = random.randint(60, 100)
+compteur = 0
 
 def open_profile(profile_link):   
     driver.execute_script("window.open('', '_blank');")
@@ -18,6 +19,10 @@ def open_profile(profile_link):
     html = driver.find_element(By.TAG_NAME, 'html')
     html.send_keys(Keys.END)
     time.sleep(short_random)
+    # Incrémenter la variable globale
+    global compteur   
+    compteur += 1
+    print(compteur)
     driver.close()  
     driver.switch_to.window(driver.window_handles[0])  
 
