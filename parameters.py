@@ -20,3 +20,7 @@ results_file = "invitations.csv"      # journal : url;statut;date
 max_invites_per_run = 20              # limite par lancement (rester prudent)
 min_delay_seconds = 30                # pause aléatoire entre deux profils
 max_delay_seconds = 90
+
+# Note jointe à l'invitation ("" = pas de note). {prenom} = prénom du profil. Max 300 caractères.
+# Si la note est impossible (quota gratuit atteint…), le script envoie sans note.
+connection_note = "Bonjour {prenom}, je serais ravi de vous compter dans mon réseau."

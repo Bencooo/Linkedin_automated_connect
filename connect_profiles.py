@@ -18,7 +18,10 @@ from linkedIn import build_driver, login
 CONNECT_LABELS = {"se connecter", "connect"}
 PENDING_LABELS = {"en attente", "pending"}
 MORE_LABELS = {"plus", "more"}
-SEND_LABELS = {"envoyer sans note", "send without a note", "envoyer", "send"}
+ADD_NOTE_LABELS = {"ajouter une note", "add a note"}
+SEND_NO_NOTE_LABELS = {"envoyer sans note", "send without a note", "envoyer", "send"}
+SEND_LABELS = {"envoyer", "send"}
+NOTE_MAX_CHARS = 300  # limite LinkedIn
 
 SENT, PENDING, UNAVAILABLE, ERROR = "ENVOYE", "EN_ATTENTE", "INDISPONIBLE", "ERREUR"
 
@@ -50,7 +53,7 @@ def visible(el):
 
 
 def profile_name(driver):
-    return norm(WebDriverWait(driver, 15).until(lambda d: d.find_element(By.CSS_SELECTOR, "main h1")).text)
+    return WebDriverWait(driver, 15).until(lambda d: d.find_element(By.CSS_SELECTOR, "main h1")).text.strip()
 
 
 def find_for_person(driver, labels, name, tags="button, a", scope="main "):
@@ -65,23 +68,42 @@ def find_for_person(driver, labels, name, tags="button, a", scope="main "):
     return None
 
 
-def click_send_in_dialog(driver):
-    dialog = WebDriverWait(driver, 10).until(lambda d: d.find_element(By.CSS_SELECTOR, '[role="dialog"]'))
+def get_dialog(driver):
+    return WebDriverWait(driver, 10).until(lambda d: d.find_element(By.CSS_SELECTOR, '[role="dialog"]'))
+
+
+def click_in_dialog(dialog, labels):
     for btn in dialog.find_elements(By.CSS_SELECTOR, "button"):
-        if visible(btn) and norm(btn.text) in SEND_LABELS:
+        if visible(btn) and norm(btn.text) in labels:
             btn.click()
-            return
-    raise RuntimeError("bouton « Envoyer sans note » introuvable dans la fenêtre (email requis ?)")
+            return True
+    return False
 
 
-def connect_to(driver, url):
-    """Retourne le statut (SENT, PENDING, UNAVAILABLE) ; lève une exception en cas de problème."""
+def send_with_note(driver, note):
+    """Ajoute la note puis envoie. Lève une exception si ce n'est pas possible."""
+    dialog = get_dialog(driver)
+    if not click_in_dialog(dialog, ADD_NOTE_LABELS):
+        raise RuntimeError("bouton « Ajouter une note » indisponible")
+    textarea = WebDriverWait(driver, 5).until(lambda d: d.find_element(By.CSS_SELECTOR, '[role="dialog"] textarea'))
+    textarea.send_keys(note[:NOTE_MAX_CHARS])
+    if not click_in_dialog(get_dialog(driver), SEND_LABELS):
+        raise RuntimeError("bouton « Envoyer » introuvable après la note")
+
+
+def send_without_note(driver):
+    if not click_in_dialog(get_dialog(driver), SEND_NO_NOTE_LABELS):
+        raise RuntimeError("bouton « Envoyer sans note » introuvable dans la fenêtre (email requis ?)")
+
+
+def open_connect_dialog(driver, url):
+    """Ouvre le profil et la fenêtre d'invitation. Retourne (statut, prénom) ; statut None = fenêtre ouverte."""
     driver.get(url)
-    name = profile_name(driver)
-    first_name = name.split()[0] if name else name
+    full_name = profile_name(driver)
+    first_name = norm(full_name.split()[0])
 
     if find_for_person(driver, PENDING_LABELS, first_name):
-        return PENDING
+        return PENDING, full_name
 
     button = find_for_person(driver, CONNECT_LABELS, first_name)
     if not button:
@@ -91,12 +113,33 @@ def connect_to(driver, url):
         if more:
             more.click()
             time.sleep(1)
-            button = find_for_person(driver, CONNECT_LABELS, first_name, tags='[role="menuitem"], div[role="button"], a, button', scope="")
+            button = find_for_person(driver, CONNECT_LABELS, first_name,
+                                     tags='[role="menuitem"], div[role="button"], a, button', scope="")
     if not button:
-        return UNAVAILABLE  # déjà connecté, « Suivre » seulement, profil restreint…
+        return UNAVAILABLE, full_name  # déjà connecté, « Suivre » seulement, profil restreint…
 
     button.click()
-    click_send_in_dialog(driver)
+    return None, full_name
+
+
+def connect_to(driver, url, note_template):
+    """Retourne le statut (SENT, PENDING, UNAVAILABLE) ; lève une exception en cas de problème."""
+    status, full_name = open_connect_dialog(driver, url)
+    if status:
+        return status
+
+    note = note_template.replace("{prenom}", full_name.split()[0]).strip() if note_template else ""
+    if note:
+        try:
+            send_with_note(driver, note)
+            time.sleep(2)
+            return SENT
+        except Exception as e:
+            print(f"  note impossible ({e}), nouvel essai sans note")
+            status, _ = open_connect_dialog(driver, url)  # on repart d'un état propre
+            if status:
+                return status
+    send_without_note(driver)
     time.sleep(2)
     return SENT
 
@@ -123,7 +166,7 @@ def main():
                 print("Limite par lancement atteinte, arrêt.")
                 break
             try:
-                status = connect_to(driver, url)
+                status = connect_to(driver, url, parameters.connection_note)
             except Exception as e:
                 status = ERROR
                 print(f"  détail : {e}")
