@@ -246,10 +246,11 @@ def main():
 
     driver = None
     sent = 0
+    crashed = False
     try:
         driver = build_driver()
         login(driver)
-        for url, note in todo:
+        for i, (url, note) in enumerate(todo):
             if sent >= parameters.max_invites_per_run:
                 print("Limite par lancement atteinte, arrêt.")
                 break
@@ -272,15 +273,19 @@ def main():
             print(f"{status:12} {note_mode:10} {name or url}")
             if status == SENT:
                 sent += 1
-            time.sleep(random.uniform(parameters.min_delay_seconds, parameters.max_delay_seconds))
+            is_last = i == len(todo) - 1
+            if not is_last and sent < parameters.max_invites_per_run:
+                time.sleep(random.uniform(parameters.min_delay_seconds, parameters.max_delay_seconds))
         print(f"Terminé : {sent} invitation(s) envoyée(s).")
     except KeyboardInterrupt:
         print("\nINFO : annulé par l'utilisateur")
     except Exception as e:
+        crashed = True
         print(f"ERREUR : {e}")
     finally:
         if driver:
-            input("Appuie sur Entrée pour fermer Chrome.")
+            if crashed:  # erreur inattendue : on laisse Chrome ouvert pour inspecter
+                input("Chrome reste ouvert pour inspection. Appuie sur Entrée pour fermer.")
             driver.quit()
 
 
