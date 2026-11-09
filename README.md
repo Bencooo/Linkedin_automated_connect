@@ -1,7 +1,28 @@
 # LinkedIn – envoi d'invitations depuis une liste de profils
 
-Se connecte à LinkedIn (session Chrome conservée) puis envoie une invitation à chaque
-profil d'un fichier CSV, avec une note personnalisée si elle est fournie.
+> **Version à utiliser : la branche `connect-from-links`** (celle-ci). C'est la seule
+> version fonctionnelle et testée (novembre 2026). Les autres branches sont conservées pour mémoire.
+
+## Les versions du projet
+
+| Branche | Ce que c'est | Statut |
+|---|---|---|
+| **`connect-from-links`** | **Envoie des invitations à une liste de liens de profils fournie dans un CSV** (avec une note personnalisée par profil, optionnelle). | ✅ **Fonctionnelle, à utiliser** |
+| `legacy-search-bot` (= `main`) | Ancien bot : tape des mots-clés dans la recherche LinkedIn, parcourt les pages de résultats et clique « Se connecter » sur tout le monde. Identifiants en clair dans `parameters.py`. | ⚠️ Conservé tel quel, non maintenu : son login ne fonctionne plus avec le LinkedIn actuel |
+| `cleanup-login-env` | Étape intermédiaire : login réparé, identifiants dans `.env`, session Chrome persistante, sans envoi d'invitations. | Historique |
+
+Pour utiliser la bonne version : `git checkout connect-from-links`.
+
+## Comment ça marche (`connect-from-links`)
+
+1. Vous fournissez un fichier `profiles.csv` : un profil par ligne, avec sa note éventuelle.
+2. Le script ouvre Chrome (profil dédié, la session est conservée) et se connecte à LinkedIn si besoin.
+3. Pour chaque profil : il ouvre la page, clique « Se connecter » (directement ou via le menu « … »),
+   ajoute la note si elle existe, puis envoie. Si la note est impossible (quota LinkedIn atteint…),
+   l'invitation part **sans note**.
+4. Il vérifie que le bouton appartient bien au profil visité (jamais une suggestion « Autres profils »).
+5. Il fait une pause aléatoire entre deux profils, s'arrête à la limite par lancement
+   (20 par défaut) et note chaque résultat dans `invitations.csv`.
 
 ## Installation
 
@@ -11,34 +32,65 @@ source .venv/bin/activate
 pip install selenium webdriver-manager python-dotenv
 ```
 
+Chrome doit être installé.
+
 ## Configuration
 
-1. Copiez `.env.example` en `.env` et renseignez `LINKEDIN_USERNAME` et `LINKEDIN_PASSWORD`
-   (ce fichier est ignoré par git, ne le committez jamais).
-2. Créez `profiles.csv` (modèle : `profiles.example.csv`), séparateur `;` :
+**1. Identifiants** : copiez `.env.example` en `.env` et renseignez
+`LINKEDIN_USERNAME` et `LINKEDIN_PASSWORD` (fichier ignoré par git, ne le committez jamais).
 
-   ```csv
-   url;note
-   https://www.linkedin.com/in/exemple-1/;Bonjour Marie, ravi d'échanger avec vous.
-   https://www.linkedin.com/in/exemple-2/;
-   ```
+**2. Le CSV des profils** : créez `profiles.csv` (modèle : `profiles.example.csv`).
+Séparateur `;`, en-tête obligatoire, deux colonnes :
 
-   Une note vide = invitation sans note. La note est limitée à 300 caractères ; si elle est
-   impossible (quota LinkedIn atteint…), l'invitation part sans note.
-3. Réglages optionnels dans `parameters.py` : limite d'invitations par lancement, pauses entre profils.
+| Colonne | Contenu |
+|---|---|
+| `url` | lien du profil LinkedIn (obligatoire) |
+| `note` | texte de la note jointe à l'invitation, 300 caractères max. **Vide = sans note.** |
 
-## Utilisation
+```csv
+url;note
+https://www.linkedin.com/in/exemple-1/;Bonjour Marie, ravi d'échanger avec vous sur vos recherches de profils.
+https://www.linkedin.com/in/exemple-2/;
+```
+
+Si une note contient un `;`, mettez-la entre guillemets. Pas de retour à la ligne dans une note.
+
+**3. Réglages** (optionnel, `parameters.py`) : `max_invites_per_run` (20), `min_delay_seconds` /
+`max_delay_seconds` (pause de 30 à 90 s entre deux profils). Restez prudent : LinkedIn limite les
+invitations et peut restreindre un compte qui en envoie trop vite.
+
+## Lancer
 
 ```bash
 python connect_profiles.py
 ```
 
-- Première fois : connexion automatique (un code ou un captcha éventuel se fait à la main).
-  Ensuite la session est réutilisée (`.chrome_profile/`).
-- Le journal `invitations.csv` contient une ligne par profil : `url;nom;statut;note;date`.
-  Statuts : `ENVOYE`, `EN_ATTENTE`, `INDISPONIBLE`, `ERREUR`. Les profils `ENVOYE` / `EN_ATTENTE`
-  sont ignorés aux lancements suivants ; les autres sont retentés (la ligne est mise à jour).
-- En cas d'`ERREUR` ou d'`INDISPONIBLE`, une capture et le HTML de la page sont sauvegardés dans `debug/`.
+Première fois : connexion automatique (un code ou un captcha éventuel se fait à la main dans la fenêtre).
+Ensuite la session est réutilisée. Chrome se ferme à la fin.
+
+## Résultats : `invitations.csv`
+
+Une ligne par profil, mise à jour à chaque tentative : `url;nom;statut;note;date`.
+
+| Statut | Signification |
+|---|---|
+| `ENVOYE` | invitation envoyée (colonne `note` : `avec_note` ou `sans_note`) |
+| `EN_ATTENTE` | une invitation était déjà en attente |
+| `INDISPONIBLE` | pas de bouton « Se connecter » (déjà connecté, profil restreint, « Suivre » seulement…) |
+| `ERREUR` | problème technique, voir ci-dessous |
+
+`ENVOYE` et `EN_ATTENTE` sont ignorés aux lancements suivants ; `INDISPONIBLE` et `ERREUR` sont retentés.
+Le script ne sait pas si une invitation a été acceptée ensuite.
+
+## En cas d'erreur (à envoyer au mainteneur)
+
+Quand un profil sort en `ERREUR` ou `INDISPONIBLE`, le script crée **automatiquement, sur la machine
+qui l'a lancé**, un dossier `debug/` avec une capture d'écran (`.png`) et le HTML de la page (`.html`,
+et `.shadow.html` pour la fenêtre d'invitation). Rien n'est envoyé tout seul : il faut transmettre
+ces fichiers, avec le texte affiché dans le terminal.
+
+⚠️ Ces fichiers contiennent des données de **votre** session LinkedIn (votre nom, votre messagerie,
+le contenu de la page). Jetez un œil à la capture avant de la partager, et supprimez `debug/` ensuite.
 
 ## Fichiers
 
@@ -46,7 +98,6 @@ python connect_profiles.py
 |---|---|
 | `connect_profiles.py` | script principal |
 | `linkedin_session.py` | lancement de Chrome et connexion |
-| `parameters.py` | identifiants (via `.env`) et réglages |
-| `profiles.csv` / `invitations.csv` / `.env` / `.chrome_profile/` / `debug/` | locaux, ignorés par git |
-
-L'ancien bot (recherche par mots-clés et envoi en masse) est conservé sur la branche `legacy-search-bot`.
+| `parameters.py` | identifiants (lus depuis `.env`) et réglages |
+| `profiles.example.csv` | modèle du CSV d'entrée |
+| `profiles.csv`, `invitations.csv`, `.env`, `.chrome_profile/`, `debug/` | locaux, ignorés par git |
