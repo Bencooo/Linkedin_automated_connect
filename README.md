@@ -14,8 +14,12 @@ Utilisez le gestionnaire de paquets [pip](https://pip.pypa.io/en/stable/) pour i
 ```bash
 pip install selenium
 pip install webdriver-manager
+pip install python-dotenv
 ```
 
 ## Comment utiliser ?
- - Ouvrez le fichier parameters.py et indiquez votre adresse email, votre mot de passe et des mots clés pour les critères de recherche.
+ - Copiez `.env.example` en `.env` et renseignez `LINKEDIN_USERNAME` et `LINKEDIN_PASSWORD` (ce fichier est ignoré par git, ne le committez jamais).
+ - Les autres paramètres (mots clés, pages, etc.) se trouvent dans `parameters.py`.
  - Exécutez `python linkedIn.py`
+
+Pour l'instant, seule la connexion est active ; la recherche et l'envoi d'invitations sont désactivés.

@@ -1,112 +1,117 @@
+from pathlib import Path
+
 from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
-import parameters, csv, os.path, time
-from datetime import datetime
-import random
+from selenium.webdriver.support.ui import WebDriverWait
+from webdriver_manager.chrome import ChromeDriverManager
 
-short_random = random.randint(5, 20)
-medium_random = random.randint(20, 60)
-long_random = random.randint(60, 100)
-compteur = 0
+import parameters
 
-def open_profile(profile_link):   
-    driver.execute_script("window.open('', '_blank');")
-    driver.switch_to.window(driver.window_handles[-1])
-    driver.get(profile_link)
-    time.sleep(short_random)
-    html = driver.find_element(By.TAG_NAME, 'html')
-    html.send_keys(Keys.END)
-    time.sleep(short_random)
-    # Incrémenter la variable globale
-    global compteur   
-    compteur += 1
-    print(compteur)
-    driver.close()  
-    driver.switch_to.window(driver.window_handles[0])  
+# NOTE : la recherche et l'envoi d'invitations (open_profile, search_and_send_request,
+# log CSV, ignore_list) sont volontairement désactivés. Ils restent disponibles dans
+# l'historique git (commit 21a38db) et ne doivent pas être réactivés pour l'instant.
 
-# Functions
-def search_and_send_request(keywords, till_page, writer, ignore_list=[]):
-    with open(file_name, mode='a', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file, delimiter=';')
-        for page in range(1, till_page + 1):
-            print('\nINFO: Checking on page %s' % (page))
-            query_url = 'https://www.linkedin.com/search/results/people/?keywords=' + keywords + '&origin=GLOBAL_SEARCH_HEADER&page=' + str(page)
-            driver.get(query_url)
-            time.sleep(medium_random)
-            html = driver.find_element(By.TAG_NAME, 'html')
-            html.send_keys(Keys.END)
-            time.sleep(medium_random)
-            linkedin_urls = driver.find_elements(By.CLASS_NAME, 'reusable-search__result-container')
-            print('INFO: %s connections found on page %s' % (len(linkedin_urls), page))
-            for index, result in enumerate(linkedin_urls, start=1):
-                text = result.text.split('\n')[0]
-                if text in ignore_list or text.strip() in ignore_list:
-                    print("%s ) IGNORED: %s" % (index, text))
-                    continue
-                connection_action = result.find_elements(By.CLASS_NAME, 'artdeco-button__text')
-                if connection_action:
-                    connection = connection_action[0]
-                else:
-                    print("%s ) CANT: %s" % (index, text))
-                    continue
-                if connection.text == 'Connect':
-                    try:
-                        coordinates = connection.location_once_scrolled_into_view  # returns dict of X, Y coordinates
-                        driver.execute_script("window.scrollTo(%s, %s);" % (coordinates['x'], coordinates['y']))
-                        time.sleep(medium_random)
-                        connection.click()
-                        time.sleep(medium_random)
-                        if driver.find_elements(By.CLASS_NAME, 'artdeco-button--primary')[0].is_enabled():
-                            driver.find_elements(By.CLASS_NAME, 'artdeco-button--primary')[0].click()
-                            date_actuelle = datetime.now().strftime("%Y-%m-%d")
-                            writer.writerow([text, date_actuelle])
-                            print("%s ) SENT: %s" % (index, text))
-                            profile_link = result.find_element(By.TAG_NAME, 'a').get_attribute('href')
-                            open_profile(profile_link)
-                        
-                        else:
-                            driver.find_elements(By.CLASS_NAME, 'artdeco-modal__dismiss')[0].click()
-                            print("%s ) CANT: %s" % (index, text))
-                    except Exception as e:
-                        print('%s ) ERROR: %s' % (index, text))
-                    time.sleep(medium_random)
-                elif connection.text == 'Pending':
-                    print("%s ) PENDING: %s" % (index, text))
-                else:
-                    if text:
-                        print("%s ) CANT: %s" % (index, text))
-                    else:
-                        print("%s ) ERROR: You might have reached limit" % (index))
+LOGIN_URL = "https://www.linkedin.com/login"
+FEED_URL = "https://www.linkedin.com/feed/"
+# Profil Chrome dédié : conserve les cookies entre deux lancements (pas besoin de se reconnecter).
+PROFILE_DIR = Path(__file__).resolve().parent / ".chrome_profile"
+WAIT_SECONDS = 15
+
+# Libellés exacts acceptés pour le bouton de connexion (comparaison stricte, pas de sous-chaîne,
+# sinon "Sign in with Passkey" / Apple serait cliqué).
+LOGIN_LABELS = {"s'identifier", "se connecter", "sign in", "log in"}
+# Boutons à ignorer absolument.
+BLOCKED_WORDS = ("apple", "passkey", "google", "facebook", "microsoft", "afficher")
 
 
-try:
-    # Login
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
-    driver.get('https://www.linkedin.com/login')
-    driver.find_element('id', 'username').send_keys(parameters.linkedin_username)
-    driver.find_element('id', 'password').send_keys(parameters.linkedin_password)
-    driver.find_element('xpath', '//*[@type="submit"]').click()
-    time.sleep(10)
-    # CSV file loging
-    file_name = parameters.file_name
-    file_exists = os.path.isfile(file_name)
-    writer = csv.writer(open(file_name, 'a'))
-    if not file_exists: writer.writerow(['Connection Summary'])
-    ignore_list = parameters.ignore_list
-    if ignore_list:
-        ignore_list = [i.strip() for i in ignore_list.split(',') if i]
-    else:
-        ignore_list = []
-    # Search
-    search_and_send_request(keywords=parameters.keywords, till_page=parameters.till_page, writer=writer,
-                            ignore_list=ignore_list)
-except KeyboardInterrupt:
-    print("\n\nINFO: User Canceled\n")
-except Exception as e:
-    print('ERROR: Unable to run, error - %s' % (e))
-finally:
-    # Close browser
-    driver.quit()
+def _normalize(text):
+    return (text or "").replace("’", "'").strip().lower()
+
+
+def visible_input(driver, css_selector):
+    """Premier élément visible et actif correspondant au sélecteur (ignore les champs cachés)."""
+    for el in driver.find_elements(By.CSS_SELECTOR, css_selector):
+        if el.is_displayed() and el.is_enabled():
+            return el
+    return False
+
+
+def linkedin_login_button(driver):
+    """Bouton de connexion LinkedIn (type="button", libellé exact), ou False."""
+    for el in driver.find_elements(By.CSS_SELECTOR, 'button[type="button"]'):
+        if not (el.is_displayed() and el.is_enabled()):
+            continue
+        label = _normalize(el.text)
+        combined = f"{label} {_normalize(el.get_attribute('aria-label'))}"
+        if any(word in combined for word in BLOCKED_WORDS):
+            continue
+        if label in LOGIN_LABELS:
+            return el
+    return False
+
+
+def fill_field(driver, css_selector, value, name):
+    try:
+        field = WebDriverWait(driver, WAIT_SECONDS).until(lambda d: visible_input(d, css_selector))
+    except Exception:
+        raise RuntimeError(f"Champ « {name} » introuvable ou non visible ({css_selector})")
+    field.click()
+    field.send_keys(value)
+
+
+def build_driver():
+    options = Options()
+    options.add_argument(f"--user-data-dir={PROFILE_DIR}")
+    return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
+
+def is_logged_in(driver):
+    """Vrai si LinkedIn ouvre le fil d'actualité sans rediriger vers login/authwall."""
+    driver.get(FEED_URL)
+    url = driver.current_url
+    return "/feed" in url and not any(x in url for x in ("login", "authwall", "checkpoint"))
+
+
+def login(driver):
+    """Se connecte avec les identifiants du .env, sauf si la session est déjà active."""
+    if is_logged_in(driver):
+        print("Session déjà active, connexion ignorée.")
+        return
+
+    if not parameters.linkedin_username or not parameters.linkedin_password:
+        raise RuntimeError("Identifiants manquants : renseigne LINKEDIN_USERNAME et LINKEDIN_PASSWORD dans .env")
+
+    driver.get(LOGIN_URL)
+    # Les id sont dynamiques et il y a des champs cachés : on cible le type, en visible.
+    fill_field(driver, 'input[type="email"]', parameters.linkedin_username, "email")
+    fill_field(driver, 'input[type="password"]', parameters.linkedin_password, "mot de passe")
+
+    try:
+        button = WebDriverWait(driver, WAIT_SECONDS).until(linkedin_login_button)
+    except Exception:
+        raise RuntimeError("Bouton de connexion introuvable (S'identifier / Se connecter / Sign in / Log in)")
+    print("Bouton cliqué :", repr(button.text))
+    button.click()
+
+
+def main():
+    driver = None
+    try:
+        driver = build_driver()
+        login(driver)
+        input("Connexion tentée. Appuie sur Entrée dans le terminal pour fermer Chrome.")
+    except KeyboardInterrupt:
+        print("\nINFO : annulé par l'utilisateur")
+    except Exception as e:
+        print(f"ERREUR : {e}")
+        if driver:
+            input("Chrome reste ouvert pour inspection. Appuie sur Entrée pour fermer.")
+    finally:
+        if driver:
+            driver.quit()
+
+
+if __name__ == "__main__":
+    main()
