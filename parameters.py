@@ -13,3 +13,10 @@ file_name = "connections.csv"
 keywords = "Freelance,consultant,fullstack"
 ignore_list = "Person1,Person2"
 till_page = 100
+
+# --- Mode "liste de liens" (connect_profiles.py) ---
+profiles_file = "profiles.txt"        # un lien de profil par ligne
+results_file = "invitations.csv"      # journal : url;statut;date
+max_invites_per_run = 20              # limite par lancement (rester prudent)
+min_delay_seconds = 30                # pause aléatoire entre deux profils
+max_delay_seconds = 90

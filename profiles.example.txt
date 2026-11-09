@@ -1,0 +1,3 @@
+https://www.linkedin.com/in/exemple-1/
+https://www.linkedin.com/in/exemple-2/
+# les lignes commençant par # sont ignorées
