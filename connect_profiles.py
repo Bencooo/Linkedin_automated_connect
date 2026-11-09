@@ -124,49 +124,64 @@ def find_for_person(driver, labels, name, tags="button, a", scope=None):
     return None
 
 
-def get_dialog(driver):
-    """Racine de la fenêtre d'invitation.
+def dialog_elements(driver, css):
+    """Éléments `css` à l'intérieur de la fenêtre d'invitation ([role="dialog"]).
 
-    LinkedIn l'affiche dans un shadow DOM (#interop-outlet) : invisible dans le HTML
-    normal, il faut passer par shadow_root. Repli : un [role="dialog"] classique.
+    LinkedIn affiche cette fenêtre dans un shadow DOM (#interop-outlet), invisible dans le
+    HTML normal : on cherche d'abord là, puis dans la page. Liste vide si la fenêtre n'est pas affichée.
     """
+    scopes = []
+    try:
+        scopes = [host.shadow_root for host in driver.find_elements(By.CSS_SELECTOR, "#interop-outlet")]
+    except Exception:
+        pass
+    for scope in scopes + [driver]:
+        try:
+            found = scope.find_elements(By.CSS_SELECTOR, f'[role="dialog"] {css}')
+            if found:
+                return found
+        except Exception:
+            continue
+    return []
+
+
+def click_in_dialog(driver, labels, timeout=8):
+    """Attend un bouton de la fenêtre au libellé exact, puis le clique. False si absent."""
     def find(d):
         try:
-            for host in d.find_elements(By.CSS_SELECTOR, "#interop-outlet"):
-                root = host.shadow_root
-                if root.find_elements(By.CSS_SELECTOR, "button"):
-                    return root
-            dialogs = d.find_elements(By.CSS_SELECTOR, '[role="dialog"]')
-            return dialogs[0] if dialogs else False
+            return next((b for b in dialog_elements(d, "button") if visible(b) and norm(b.text) in labels), False)
         except Exception:
             return False
     try:
-        return WebDriverWait(driver, 10).until(find)
+        button = WebDriverWait(driver, timeout).until(find)
     except Exception:
-        raise RuntimeError("fenêtre d'invitation introuvable")
+        return False
+    safe_click(driver, button)
+    return True
 
 
-def click_in_dialog(driver, labels):
-    for btn in get_dialog(driver).find_elements(By.CSS_SELECTOR, "button"):
-        if visible(btn) and norm(btn.text) in labels:
-            safe_click(driver, btn)
-            return True
-    return False
+def wait_dialog_closed(driver, timeout=6):
+    try:
+        WebDriverWait(driver, timeout).until(lambda d: not dialog_elements(d, "button"))
+    except Exception:
+        pass
 
 
 def send_with_note(driver, note):
     """Ajoute la note puis envoie. Lève une exception si ce n'est pas possible."""
     if not click_in_dialog(driver, ADD_NOTE_LABELS):
         raise RuntimeError("bouton « Ajouter une note » indisponible")
-    textarea = WebDriverWait(driver, 5).until(lambda d: get_dialog(d).find_element(By.CSS_SELECTOR, "textarea"))
+    textarea = WebDriverWait(driver, 5).until(lambda d: next(iter(dialog_elements(d, "textarea")), False))
     textarea.send_keys(note[:NOTE_MAX_CHARS])
     if not click_in_dialog(driver, SEND_LABELS):
         raise RuntimeError("bouton « Envoyer » introuvable après la note")
+    wait_dialog_closed(driver)
 
 
 def send_without_note(driver):
     if not click_in_dialog(driver, SEND_NO_NOTE_LABELS):
         raise RuntimeError("bouton « Envoyer sans note » introuvable dans la fenêtre (email requis ?)")
+    wait_dialog_closed(driver)
 
 
 def open_connect_dialog(driver, url):
