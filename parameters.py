@@ -8,13 +8,6 @@ load_dotenv()
 linkedin_username = os.getenv("LINKEDIN_USERNAME", "")
 linkedin_password = os.getenv("LINKEDIN_PASSWORD", "")
 
-# Recherche / envoi d'invitations (désactivé pour l'instant)
-file_name = "connections.csv"
-keywords = "Freelance,consultant,fullstack"
-ignore_list = "Person1,Person2"
-till_page = 100
-
-# --- Mode "liste de liens" (connect_profiles.py) ---
 profiles_file = "profiles.csv"        # colonnes url;note (note vide = sans note)
 results_file = "invitations.csv"      # journal : url;nom;statut;note;date
 max_invites_per_run = 20              # limite par lancement (rester prudent)

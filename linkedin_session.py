@@ -1,3 +1,4 @@
+"""Session LinkedIn : lance Chrome (profil persistant) et se connecte si nécessaire."""
 from pathlib import Path
 
 from selenium import webdriver
@@ -9,9 +10,6 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 import parameters
 
-# NOTE : la recherche et l'envoi d'invitations (open_profile, search_and_send_request,
-# log CSV, ignore_list) sont volontairement désactivés. Ils restent disponibles dans
-# l'historique git (commit 21a38db) et ne doivent pas être réactivés pour l'instant.
 
 LOGIN_URL = "https://www.linkedin.com/login"
 FEED_URL = "https://www.linkedin.com/feed/"
@@ -94,24 +92,3 @@ def login(driver):
         raise RuntimeError("Bouton de connexion introuvable (S'identifier / Se connecter / Sign in / Log in)")
     print("Bouton cliqué :", repr(button.text))
     button.click()
-
-
-def main():
-    driver = None
-    try:
-        driver = build_driver()
-        login(driver)
-        input("Connexion tentée. Appuie sur Entrée dans le terminal pour fermer Chrome.")
-    except KeyboardInterrupt:
-        print("\nINFO : annulé par l'utilisateur")
-    except Exception as e:
-        print(f"ERREUR : {e}")
-        if driver:
-            input("Chrome reste ouvert pour inspection. Appuie sur Entrée pour fermer.")
-    finally:
-        if driver:
-            driver.quit()
-
-
-if __name__ == "__main__":
-    main()

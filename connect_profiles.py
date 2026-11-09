@@ -1,7 +1,7 @@
 """Envoie une invitation LinkedIn (avec la note du CSV si elle existe, sinon sans note) à chaque profil listé dans profiles.csv (colonnes url;note).
 
 Lancer : python connect_profiles.py
-La connexion et la session Chrome persistante viennent de linkedIn.py.
+La connexion et la session Chrome persistante viennent de linkedin_session.py.
 """
 import csv
 import random
@@ -15,7 +15,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
 import parameters
-from linkedIn import build_driver, login
+from linkedin_session import build_driver, login
 
 CONNECT_LABELS = {"se connecter", "connect"}
 PENDING_LABELS = {"en attente", "pending"}
@@ -58,12 +58,23 @@ def already_done(path):
 
 
 def log_result(path, url, name, status, note_mode):
-    is_new = not Path(path).exists()
-    with open(path, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f, delimiter=";")
-        if is_new:
-            writer.writerow(RESULT_COLUMNS)
-        writer.writerow([url, name, status, note_mode, datetime.now().strftime("%Y-%m-%d %H:%M")])
+    """Une seule ligne par profil : on met à jour la ligne existante au lieu d'en ajouter une."""
+    rows = {}
+    if Path(path).exists():
+        with open(path, newline="", encoding="utf-8") as f:
+            rows = {r["url"]: r for r in csv.DictReader(f, delimiter=";") if r.get("url")}
+    previous = rows.get(url, {})
+    rows[url] = {
+        "url": url,
+        "nom": name or previous.get("nom", ""),
+        "statut": status,
+        "note": note_mode,
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=RESULT_COLUMNS, delimiter=";")
+        writer.writeheader()
+        writer.writerows(rows.values())
 
 
 def visible(el):
