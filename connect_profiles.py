@@ -96,6 +96,12 @@ def dump_debug(driver, url):
     print(f"  capture et HTML sauvegardés dans {DEBUG_DIR / slug}.*")
 
 
+def aria_text(el):
+    """aria-label de l'élément et de ses descendants (dans le menu « … », il est sur un <div> interne)."""
+    labels = [el.get_attribute("aria-label")] + [c.get_attribute("aria-label") for c in el.find_elements(By.CSS_SELECTOR, "[aria-label]")]
+    return norm(" ".join(l for l in labels if l))
+
+
 def page_scope(driver):
     """Zone de la page à explorer : <main> s'il existe, sinon toute la page."""
     return "main " if driver.find_elements(By.CSS_SELECTOR, "main") else ""
@@ -109,7 +115,7 @@ def find_for_person(driver, labels, name, tags="button, a", scope=None):
     """
     scope = page_scope(driver) if scope is None else scope
     for el in driver.find_elements(By.CSS_SELECTOR, ", ".join(scope + t.strip() for t in tags.split(","))):
-        if visible(el) and norm(el.text) in labels and name in norm(el.get_attribute("aria-label")):
+        if visible(el) and norm(el.text) in labels and name in aria_text(el):
             return el
     return None
 
