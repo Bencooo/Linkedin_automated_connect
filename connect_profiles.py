@@ -1,4 +1,4 @@
-"""Envoie une invitation LinkedIn (sans note) à chaque profil listé dans profiles.txt.
+"""Envoie une invitation LinkedIn (avec la note du CSV si elle existe, sinon sans note) à chaque profil listé dans profiles.csv (colonnes url;note).
 
 Lancer : python connect_profiles.py
 La connexion et la session Chrome persistante viennent de linkedIn.py.
@@ -24,6 +24,8 @@ SEND_LABELS = {"envoyer", "send"}
 NOTE_MAX_CHARS = 300  # limite LinkedIn
 
 SENT, PENDING, UNAVAILABLE, ERROR = "ENVOYE", "EN_ATTENTE", "INDISPONIBLE", "ERREUR"
+WITH_NOTE, WITHOUT_NOTE = "avec_note", "sans_note"
+RESULT_COLUMNS = ["url", "nom", "statut", "note", "date"]
 
 
 def norm(text):
@@ -31,21 +33,34 @@ def norm(text):
 
 
 def read_profiles(path):
-    lines = Path(path).read_text(encoding="utf-8").splitlines()
-    urls = [l.strip() for l in lines if l.strip() and not l.strip().startswith("#")]
-    return list(dict.fromkeys(urls))  # dédoublonne en gardant l'ordre
+    """Lit profiles.csv (url;note). Retourne une liste de (url, note), sans doublons d'url."""
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        rows = csv.DictReader(f, delimiter=";")
+        if not rows.fieldnames or "url" not in [c.strip().lower() for c in rows.fieldnames]:
+            raise RuntimeError(f"{path} doit avoir un en-tête avec au moins la colonne « url » (url;note)")
+        profiles = {}
+        for row in rows:
+            row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+            if row.get("url") and not row["url"].startswith("#"):
+                profiles.setdefault(row["url"], row.get("note", ""))
+    return list(profiles.items())
 
 
-def already_sent(path):
+def already_done(path):
+    """URLs déjà invitées (envoyées ou en attente) d'après le journal."""
     if not Path(path).exists():
         return set()
     with open(path, newline="", encoding="utf-8") as f:
-        return {row[0] for row in csv.reader(f, delimiter=";") if len(row) >= 2 and row[1] in (SENT, PENDING)}
+        return {r["url"] for r in csv.DictReader(f, delimiter=";") if r.get("statut") in (SENT, PENDING)}
 
 
-def log_result(path, url, status):
+def log_result(path, url, name, status, note_mode):
+    is_new = not Path(path).exists()
     with open(path, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f, delimiter=";").writerow([url, status, datetime.now().strftime("%Y-%m-%d %H:%M")])
+        writer = csv.writer(f, delimiter=";")
+        if is_new:
+            writer.writerow(RESULT_COLUMNS)
+        writer.writerow([url, name, status, note_mode, datetime.now().strftime("%Y-%m-%d %H:%M")])
 
 
 def visible(el):
@@ -122,36 +137,35 @@ def open_connect_dialog(driver, url):
     return None, full_name
 
 
-def connect_to(driver, url, note_template):
-    """Retourne le statut (SENT, PENDING, UNAVAILABLE) ; lève une exception en cas de problème."""
+def connect_to(driver, url, note):
+    """Retourne (statut, nom, avec/sans note). Lève une exception en cas de problème."""
     status, full_name = open_connect_dialog(driver, url)
     if status:
-        return status
+        return status, full_name, ""
 
-    note = note_template.replace("{prenom}", full_name.split()[0]).strip() if note_template else ""
     if note:
         try:
             send_with_note(driver, note)
             time.sleep(2)
-            return SENT
+            return SENT, full_name, WITH_NOTE
         except Exception as e:
             print(f"  note impossible ({e}), nouvel essai sans note")
             status, _ = open_connect_dialog(driver, url)  # on repart d'un état propre
             if status:
-                return status
+                return status, full_name, ""
     send_without_note(driver)
     time.sleep(2)
-    return SENT
+    return SENT, full_name, WITHOUT_NOTE
 
 
 def main():
     profiles_path = Path(parameters.profiles_file)
     if not profiles_path.exists():
-        print(f"ERREUR : crée {profiles_path} (voir profiles.example.txt), un lien par ligne.")
+        print(f"ERREUR : crée {profiles_path} (voir profiles.example.csv) avec les colonnes url;note.")
         return
 
-    done = already_sent(parameters.results_file)
-    todo = [u for u in read_profiles(profiles_path) if u not in done]
+    done = already_done(parameters.results_file)
+    todo = [(u, n) for u, n in read_profiles(profiles_path) if u not in done]
     print(f"{len(todo)} profil(s) à traiter (limite : {parameters.max_invites_per_run} invitations).")
     if not todo:
         return
@@ -161,17 +175,18 @@ def main():
     try:
         driver = build_driver()
         login(driver)
-        for url in todo:
+        for url, note in todo:
             if sent >= parameters.max_invites_per_run:
                 print("Limite par lancement atteinte, arrêt.")
                 break
+            name, note_mode = "", ""
             try:
-                status = connect_to(driver, url, parameters.connection_note)
+                status, name, note_mode = connect_to(driver, url, note)
             except Exception as e:
                 status = ERROR
                 print(f"  détail : {e}")
-            log_result(parameters.results_file, url, status)
-            print(f"{status:12} {url}")
+            log_result(parameters.results_file, url, name, status, note_mode)
+            print(f"{status:12} {note_mode:10} {name or url}")
             if status == SENT:
                 sent += 1
             time.sleep(random.uniform(parameters.min_delay_seconds, parameters.max_delay_seconds))

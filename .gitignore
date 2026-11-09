@@ -3,5 +3,5 @@
 __pycache__/
 *.pyc
 .chrome_profile/
-profiles.txt
+profiles.csv
 invitations.csv
