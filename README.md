@@ -1,3 +1,13 @@
+> ## ⚠️ Utilisez la branche `connect-from-links`
+> Cette branche (`main`) contient l'**ancien bot** (recherche par mots-clés), qui n'est plus maintenu
+> et dont le login ne fonctionne plus. **La version fonctionnelle est sur la branche
+> [`connect-from-links`](../../tree/connect-from-links)** : envoi d'invitations à partir d'un CSV de
+> liens de profils (`url;note`). Son README explique tout : installation, format du CSV, lancement.
+>
+> ```bash
+> git checkout connect-from-links
+> ```
+
 ![](https://content.linkedin.com/content/dam/me/business/en-us/amp/brand-site/v2/bg/LI-Logo.svg.original.svg)
 # LinkedIn Networking
 
