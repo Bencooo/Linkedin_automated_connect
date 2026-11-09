@@ -5,10 +5,12 @@ La connexion et la session Chrome persistante viennent de linkedIn.py.
 """
 import csv
 import random
+import re
 import time
 from datetime import datetime
 from pathlib import Path
 
+from selenium.common.exceptions import ElementClickInterceptedException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -17,12 +19,13 @@ from linkedIn import build_driver, login
 
 CONNECT_LABELS = {"se connecter", "connect"}
 PENDING_LABELS = {"en attente", "pending"}
-MORE_LABELS = {"plus", "more"}
+MORE_LABELS = ("plus", "more")  # préfixes de l'aria-label du bouton « … » (« Plus d'actions », « More actions »)
 ADD_NOTE_LABELS = {"ajouter une note", "add a note"}
 SEND_NO_NOTE_LABELS = {"envoyer sans note", "send without a note", "envoyer", "send"}
 SEND_LABELS = {"envoyer", "send"}
 NOTE_MAX_CHARS = 300  # limite LinkedIn
 
+DEBUG_DIR = Path(__file__).resolve().parent / "debug"
 SENT, PENDING, UNAVAILABLE, ERROR = "ENVOYE", "EN_ATTENTE", "INDISPONIBLE", "ERREUR"
 WITH_NOTE, WITHOUT_NOTE = "avec_note", "sans_note"
 RESULT_COLUMNS = ["url", "nom", "statut", "note", "date"]
@@ -68,15 +71,43 @@ def visible(el):
 
 
 def profile_name(driver):
-    return WebDriverWait(driver, 15).until(lambda d: d.find_element(By.CSS_SELECTOR, "main h1")).text.strip()
+    """Nom lu dans le titre de l'onglet (« Thibaud Texier | LinkedIn », parfois préfixé par « (23) »)."""
+    def read_title(d):
+        title = re.sub(r"^\(\d+\)\s*", "", d.title or "")
+        return title.split("|")[0].strip() if "|" in title else False
+    return WebDriverWait(driver, 15).until(read_title)
 
 
-def find_for_person(driver, labels, name, tags="button, a", scope="main "):
+def safe_click(driver, el):
+    """Clic normal, ou clic JavaScript si un bandeau/popup recouvre l'élément."""
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+    try:
+        el.click()
+    except ElementClickInterceptedException:
+        driver.execute_script("arguments[0].click();", el)
+
+
+def dump_debug(driver, url):
+    """Sauvegarde une capture et le HTML de la page pour comprendre une erreur."""
+    DEBUG_DIR.mkdir(exist_ok=True)
+    slug = re.sub(r"[^a-z0-9]+", "-", url.lower()).strip("-")[-60:]
+    driver.save_screenshot(str(DEBUG_DIR / f"{slug}.png"))
+    (DEBUG_DIR / f"{slug}.html").write_text(driver.page_source, encoding="utf-8")
+    print(f"  capture et HTML sauvegardés dans {DEBUG_DIR / slug}.*")
+
+
+def page_scope(driver):
+    """Zone de la page à explorer : <main> s'il existe, sinon toute la page."""
+    return "main " if driver.find_elements(By.CSS_SELECTOR, "main") else ""
+
+
+def find_for_person(driver, labels, name, tags="button, a", scope=None):
     """Élément visible au libellé exact ET dont l'aria-label contient le nom du profil.
 
     Le contrôle du nom évite de cliquer « Se connecter » sur les suggestions
     « Autres profils consultés » affichées sur la même page.
     """
+    scope = page_scope(driver) if scope is None else scope
     for el in driver.find_elements(By.CSS_SELECTOR, ", ".join(scope + t.strip() for t in tags.split(","))):
         if visible(el) and norm(el.text) in labels and name in norm(el.get_attribute("aria-label")):
             return el
@@ -90,7 +121,7 @@ def get_dialog(driver):
 def click_in_dialog(dialog, labels):
     for btn in dialog.find_elements(By.CSS_SELECTOR, "button"):
         if visible(btn) and norm(btn.text) in labels:
-            btn.click()
+            safe_click(dialog.parent, btn)
             return True
     return False
 
@@ -123,17 +154,18 @@ def open_connect_dialog(driver, url):
     button = find_for_person(driver, CONNECT_LABELS, first_name)
     if not button:
         # Parfois « Se connecter » est caché dans le menu « Plus »
-        more = next((b for b in driver.find_elements(By.CSS_SELECTOR, "main button")
-                     if visible(b) and norm(b.text) in MORE_LABELS), None)
+        # Le bouton « … » n'a pas de texte (icône) : on lit son aria-label.
+        more = next((b for b in driver.find_elements(By.CSS_SELECTOR, page_scope(driver) + "button")
+                     if visible(b) and norm(b.get_attribute("aria-label")).startswith(MORE_LABELS)), None)
         if more:
-            more.click()
+            safe_click(driver, more)
             time.sleep(1)
             button = find_for_person(driver, CONNECT_LABELS, first_name,
                                      tags='[role="menuitem"], div[role="button"], a, button', scope="")
     if not button:
         return UNAVAILABLE, full_name  # déjà connecté, « Suivre » seulement, profil restreint…
 
-    button.click()
+    safe_click(driver, button)
     return None, full_name
 
 
@@ -184,7 +216,16 @@ def main():
                 status, name, note_mode = connect_to(driver, url, note)
             except Exception as e:
                 status = ERROR
-                print(f"  détail : {e}")
+                print(f"  détail : {type(e).__name__}: {e}".splitlines()[0])
+                try:
+                    dump_debug(driver, url)
+                except Exception:
+                    pass
+            if status == UNAVAILABLE:
+                try:
+                    dump_debug(driver, url)
+                except Exception:
+                    pass
             log_result(parameters.results_file, url, name, status, note_mode)
             print(f"{status:12} {note_mode:10} {name or url}")
             if status == SENT:

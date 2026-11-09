@@ -5,3 +5,4 @@ __pycache__/
 .chrome_profile/
 profiles.csv
 invitations.csv
+debug/
