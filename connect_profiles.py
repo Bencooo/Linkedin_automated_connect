@@ -3,15 +3,19 @@
 Lancer : python connect_profiles.py
 La connexion et la session Chrome persistante viennent de linkedin_session.py.
 """
+import argparse
 import csv
 import random
+import signal
+import sys
 import re
 import time
 from datetime import datetime
 from pathlib import Path
 
-from selenium.common.exceptions import ElementClickInterceptedException
+from selenium.common.exceptions import ElementClickInterceptedException, StaleElementReferenceException
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 
 import parameters
@@ -195,31 +199,71 @@ def send_without_note(driver):
     wait_dialog_closed(driver)
 
 
+def find_more_button(driver):
+    """Bouton « … » du profil : son libellé est dans l'aria-label (pas de texte, c'est une icône)."""
+    return next((b for b in driver.find_elements(By.CSS_SELECTOR, page_scope(driver) + "button")
+                 if visible(b) and norm(b.get_attribute("aria-label")).startswith(MORE_LABELS)), None)
+
+
+def find_connect_in_menu(driver, first_name):
+    return find_for_person(driver, CONNECT_LABELS, first_name,
+                           tags='[role="menuitem"], div[role="button"], a, button', scope="")
+
+
+def _try_open(driver, first_name):
+    """Une tentative. Retourne (statut, bouton) : PENDING, UNAVAILABLE, ou (None, bouton « Se connecter »)."""
+    if find_for_person(driver, PENDING_LABELS, first_name):
+        return PENDING, None
+    button = find_for_person(driver, CONNECT_LABELS, first_name)
+    if not button:
+        # « Se connecter » est souvent caché dans le menu « … » (profils où « Suivre » est le bouton principal).
+        # La page peut se rafraîchir et refermer le menu juste après l'ouverture : on réessaie
+        # 3 fois avant de conclure que le bouton n'existe pas.
+        for _ in range(3):
+            more = find_more_button(driver)
+            if not more:
+                time.sleep(2)
+                continue
+            safe_click(driver, more)
+            try:
+                button = WebDriverWait(driver, 4).until(lambda d: find_connect_in_menu(d, first_name))
+                break
+            except Exception:
+                driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)  # referme le menu
+                time.sleep(2)
+    return (None, button) if button else (UNAVAILABLE, None)
+
+
 def open_connect_dialog(driver, url):
-    """Ouvre le profil et la fenêtre d'invitation. Retourne (statut, prénom) ; statut None = fenêtre ouverte."""
+    """Ouvre le profil et la fenêtre d'invitation. Retourne (statut, nom) ; statut None = fenêtre ouverte."""
     driver.get(url)
     full_name = profile_name(driver)
     first_name = norm(full_name.split()[0])
 
-    if find_for_person(driver, PENDING_LABELS, first_name):
-        return PENDING, full_name
+    # Le titre apparaît avant les boutons : on attend que la zone d'actions du profil soit affichée
+    # (sinon « … » est introuvable, ou l'élément est remplacé pendant le chargement = StaleElementReference).
+    try:
+        WebDriverWait(driver, 12).until(
+            lambda d: find_for_person(d, PENDING_LABELS | CONNECT_LABELS, first_name) or find_more_button(d))
+    except Exception:
+        pass
+    time.sleep(1.5)
 
-    button = find_for_person(driver, CONNECT_LABELS, first_name)
-    if not button:
-        # Parfois « Se connecter » est caché dans le menu « Plus »
-        # Le bouton « … » n'a pas de texte (icône) : on lit son aria-label.
-        more = next((b for b in driver.find_elements(By.CSS_SELECTOR, page_scope(driver) + "button")
-                     if visible(b) and norm(b.get_attribute("aria-label")).startswith(MORE_LABELS)), None)
-        if more:
-            safe_click(driver, more)
-            time.sleep(1)
-            button = find_for_person(driver, CONNECT_LABELS, first_name,
-                                     tags='[role="menuitem"], div[role="button"], a, button', scope="")
-    if not button:
-        return UNAVAILABLE, full_name  # déjà connecté, « Suivre » seulement, profil restreint…
-
-    safe_click(driver, button)
-    return None, full_name
+    for attempt in range(3):
+        try:
+            status, button = _try_open(driver, first_name)
+            if status:
+                return status, full_name
+            safe_click(driver, button)
+            return None, full_name
+        except StaleElementReferenceException:
+            # la page s'est rafraîchie : on ferme un éventuel menu resté ouvert et on recommence
+            try:
+                driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+            except Exception:
+                pass
+            time.sleep(2)
+    raise RuntimeError("la page n'est pas stable (éléments remplacés 3 fois)")
 
 
 def connect_to(driver, url, note):
@@ -244,6 +288,23 @@ def connect_to(driver, url, note):
 
 
 def main():
+    # Options facultatives : permettent de piloter le bot depuis LinkedIn Agent (ou à la main).
+    ap = argparse.ArgumentParser(description="Envoie des invitations LinkedIn depuis un CSV url;note")
+    ap.add_argument("--profiles", help=f"CSV d'entrée (défaut : {parameters.profiles_file})")
+    ap.add_argument("--results", help=f"journal de sortie (défaut : {parameters.results_file})")
+    ap.add_argument("--max", type=int, help=f"invitations max (défaut : {parameters.max_invites_per_run})")
+    args = ap.parse_args()
+    # Arrêt propre (Chrome fermé) sur Ctrl+C ou « Arrêter » : si le bot est lancé en arrière-plan,
+    # SIGINT peut être ignoré par défaut, on le réactive ici et on traite aussi SIGTERM.
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
+    if args.profiles:
+        parameters.profiles_file = args.profiles
+    if args.results:
+        parameters.results_file = args.results
+    if args.max is not None:
+        parameters.max_invites_per_run = args.max
+
     profiles_path = Path(parameters.profiles_file)
     if not profiles_path.exists():
         print(f"ERREUR : crée {profiles_path} (voir profiles.example.csv) avec les colonnes url;note.")
@@ -295,7 +356,7 @@ def main():
         print(f"ERREUR : {e}")
     finally:
         if driver:
-            if crashed:  # erreur inattendue : on laisse Chrome ouvert pour inspecter
+            if crashed and sys.stdin.isatty():  # erreur inattendue : on laisse Chrome ouvert pour inspecter
                 input("Chrome reste ouvert pour inspection. Appuie sur Entrée pour fermer.")
             driver.quit()
 

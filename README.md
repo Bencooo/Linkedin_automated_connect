@@ -9,6 +9,7 @@
 |---|---|---|
 | **`connect-from-links`** | **Envoie des invitations à une liste de liens de profils fournie dans un CSV** (avec une note personnalisée par profil, optionnelle). | ✅ **Fonctionnelle, à utiliser** |
 | `legacy-search-bot` (= `main`) | Ancien bot : tape des mots-clés dans la recherche LinkedIn, parcourt les pages de résultats et clique « Se connecter » sur tout le monde. Identifiants en clair dans `parameters.py`. | ⚠️ Conservé tel quel, non maintenu : son login ne fonctionne plus avec le LinkedIn actuel |
+| `agent-integration` | `connect-from-links` + options de ligne de commande, arrêt propre et attente du chargement du profil. **À utiliser avec LinkedIn Agent** (bouton « Lancer le bot »). | ✅ Fonctionnelle |
 | `cleanup-login-env` | Étape intermédiaire : login réparé, identifiants dans `.env`, session Chrome persistante, sans envoi d'invitations. | Historique |
 
 Pour utiliser la bonne version : `git checkout connect-from-links`.
@@ -67,6 +68,24 @@ python connect_profiles.py
 
 Première fois : connexion automatique (un code ou un captcha éventuel se fait à la main dans la fenêtre).
 Ensuite la session est réutilisée. Chrome se ferme à la fin.
+
+### Options de ligne de commande
+
+Toutes facultatives (sans option, le script lit `profiles.csv` et écrit `invitations.csv` comme avant) :
+
+| Option | Rôle |
+|---|---|
+| `--profiles <fichier>` | CSV d'entrée (`url;note`) |
+| `--results <fichier>` | journal de sortie |
+| `--max <n>` | nombre maximum d'invitations pour ce lancement |
+
+C'est ce qu'utilise [LinkedIn Agent](../Linkedin%20Agent/README.md) : il écrit la liste du jour dans `state/bot_profiles.csv`,
+lance le bot, puis relit `state/bot_results.csv` pour mettre à jour ses contacts.
+
+**Arrêt :** `Ctrl+C` (ou un arrêt envoyé par un autre programme) ferme Chrome proprement ; les résultats déjà obtenus sont conservés.
+
+**Profils où « Suivre » est le bouton principal :** « Se connecter » est alors caché dans le menu « … ». Le bot attend que les boutons
+du profil soient affichés, ouvre le menu et réessaie jusqu'à 3 fois si LinkedIn rafraîchit la page, avant de conclure `INDISPONIBLE`.
 
 ## Résultats : `invitations.csv`
 
